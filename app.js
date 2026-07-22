@@ -1,6 +1,8 @@
 /**
  * Pharmacist Leave Management System - GitHub Pages Frontend JavaScript
  * Uses REST API HTTP POST calls to communicate with Google Apps Script Backend.
+ * Features Client-Side RAM Caching for Instant (0ms) Calendar Navigation,
+ * Silent Background Revalidation, SweetAlert2 for Full Date Warnings, and No Popups for 1/3 & 2/3 Bookings.
  */
 
 const AppState = {
@@ -14,6 +16,7 @@ const AppState = {
 };
 
 let calendarDataCache = null;
+const clientCalendarCache = {};
 let selectedTargetUserId = null;
 
 const THAI_MONTHS = [
@@ -22,7 +25,7 @@ const THAI_MONTHS = [
 ];
 
 /**
- * Executes REST API HTTP POST calls to GAS Backend.
+ * Executes REST API HTTP POST calls to GAS Backend (With Loading Spinner).
  */
 async function callApi(action, payload = {}) {
   if (!GAS_API_URL || GAS_API_URL === "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE") {
@@ -61,6 +64,29 @@ async function callApi(action, payload = {}) {
     console.error(`API Error [${action}]:`, err);
     throw err;
   }
+}
+
+/**
+ * Executes Silent REST API call without blocking UI spinner.
+ */
+async function callApiSilent(action, payload = {}) {
+  if (!GAS_API_URL) return null;
+  try {
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: action,
+        token: AppState.token,
+        payload: payload
+      })
+    });
+    const data = await response.json();
+    if (data && data.success) return data;
+  } catch (e) {
+    console.warn(`Silent API error [${action}]:`, e);
+  }
+  return null;
 }
 
 /**
@@ -173,6 +199,7 @@ async function handleLogout() {
   AppState.token = '';
   AppState.user = null;
   localStorage.removeItem('SESSION_TOKEN');
+  Object.keys(clientCalendarCache).forEach(k => delete clientCalendarCache[k]);
 
   updateNavbarUser();
   switchView('login');
@@ -238,16 +265,42 @@ function closeModal(modalId) {
 
 /* ================= CALENDAR & LEAVE BOOKING ================= */
 
-async function loadCalendar() {
+/**
+ * Ultra-Fast Instant Client-Side Cached Calendar Loader.
+ */
+async function loadCalendar(forceRefresh = false) {
+  const cacheKey = `${AppState.calendarYear}_${AppState.calendarMonth}`;
+
+  // Instant 0ms Client Cache Render
+  if (!forceRefresh && clientCalendarCache[cacheKey]) {
+    calendarDataCache = clientCalendarCache[cacheKey];
+    renderCalendarGrid(calendarDataCache);
+    fetchCalendarDataInBackground(cacheKey);
+    return;
+  }
+
   try {
     const res = await callApi('apiGetCalendarData', {
       year: AppState.calendarYear,
       month: AppState.calendarMonth
     });
     calendarDataCache = res.data;
+    clientCalendarCache[cacheKey] = res.data;
     renderCalendarGrid(res.data);
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+async function fetchCalendarDataInBackground(cacheKey) {
+  const res = await callApiSilent('apiGetCalendarData', {
+    year: AppState.calendarYear,
+    month: AppState.calendarMonth
+  });
+  if (res && res.data) {
+    calendarDataCache = res.data;
+    clientCalendarCache[cacheKey] = res.data;
+    renderCalendarGrid(res.data);
   }
 }
 
@@ -359,14 +412,71 @@ function getTodayYMD() {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Handles Date Cell Click Event.
+ * Rules:
+ * 1. Past Date -> Show Warning Toast/Alert.
+ * 2. Full Date (>= 3/3) -> SweetAlert2 Warning showing list of booked users.
+ * 3. 1/3, 2/3, or empty date -> SELECT DATE FOR BOOKING WITHOUT ANY POPUP!
+ */
 function handleDayClick(dateStr, dayData) {
   const todayYMD = getTodayYMD();
 
   if (dateStr < todayYMD) {
-    showToast(`ไม่สามารถเลือกวันที่ในอดีตได้ (${dateStr})`, 'warning');
+    if (window.Swal) {
+      Swal.fire({
+        title: 'วันที่ในอดีต',
+        text: `ไม่สามารถเลือกวันที่ในอดีตได้ (${dateStr})`,
+        icon: 'warning',
+        background: '#1e293b',
+        color: '#f8fafc',
+        confirmButtonColor: '#3b82f6',
+        confirmButtonText: 'ตกลง'
+      });
+    } else {
+      showToast(`ไม่สามารถเลือกวันที่ในอดีตได้ (${dateStr})`, 'warning');
+    }
     return;
   }
 
+  const dailyCap = (calendarDataCache && calendarDataCache.dailyCap) || 3;
+
+  // Full date check (3/3) -> SweetAlert2 Alert
+  if (dayData.bookedCount >= dailyCap && !dayData.isUserBooked) {
+    if (window.Swal) {
+      const usersListHtml = dayData.bookedUsers && dayData.bookedUsers.length > 0
+        ? dayData.bookedUsers.map(u => `<div style="font-size:0.9rem; color:#f8fafc; margin-top:0.25rem;">💊 ${escapeHtml(u)}</div>`).join('')
+        : '<div style="color:#94a3b8; font-size:0.85rem;">ไม่พบข้อมูลรายชื่อ</div>';
+
+      Swal.fire({
+        title: 'วันที่นี้มีผู้จองเต็มแล้ว',
+        html: `
+          <div style="text-align:center; font-family:'Prompt', sans-serif;">
+            <div style="font-size:1.1rem; margin-bottom:0.8rem; color:#ef4444; font-weight:600;">
+              🚫 ไม่สามารถเลือกวันที่ ${dateStr} ได้
+            </div>
+            <div style="font-size:0.95rem; color:#cbd5e1; line-height:1.6; margin-bottom:0.8rem;">
+              วันที่นี้มีผู้จองวันลาครบกำหนดแล้ว <strong>(${dayData.bookedCount}/${dailyCap} คน)</strong>
+            </div>
+            <div style="background:rgba(255,255,255,0.05); padding:0.8rem; border-radius:8px; text-align:left;">
+              <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.4rem;">รายชื่อผู้จองวันลาในวันนี้:</div>
+              ${usersListHtml}
+            </div>
+          </div>
+        `,
+        icon: 'error',
+        background: '#1e293b',
+        color: '#f8fafc',
+        confirmButtonColor: '#3b82f6',
+        confirmButtonText: 'ตกลง'
+      });
+    } else {
+      showToast(`วันที่ ${dateStr} มีผู้จองเต็มแล้ว (${dayData.bookedCount}/${dailyCap} คน)`, 'warning');
+    }
+    return;
+  }
+
+  // Day with 0/3, 1/3, 2/3 bookings -> Simply select for booking WITHOUT popup!
   if (!AppState.selectedStartDate || (AppState.selectedStartDate && AppState.selectedEndDate)) {
     AppState.selectedStartDate = dateStr;
     AppState.selectedEndDate = null;
@@ -381,10 +491,6 @@ function handleDayClick(dateStr, dayData) {
 
   renderCalendarGrid(calendarDataCache);
   updateSelectionUI();
-
-  if (dayData.bookedUsers && dayData.bookedUsers.length > 0) {
-    showDayDetailsModal(dateStr, dayData);
-  }
 }
 
 function updateSelectionUI() {
@@ -423,31 +529,6 @@ function generateDateList(startStr, endStr) {
     curr.setDate(curr.getDate() + 1);
   }
   return list;
-}
-
-function showDayDetailsModal(dateStr, dayData) {
-  const modalTitle = document.getElementById('modalDayTitle');
-  const modalList = document.getElementById('modalDayBookedList');
-
-  modalTitle.textContent = `รายชื่อผู้จองวันลาประจำวันที่ ${dateStr}`;
-  modalList.innerHTML = '';
-
-  if (dayData.bookedUsers && dayData.bookedUsers.length > 0) {
-    dayData.bookedUsers.forEach(fullName => {
-      const item = document.createElement('div');
-      item.style.padding = '0.6rem 0.8rem';
-      item.style.borderBottom = '1px solid var(--border-color)';
-      item.style.display = 'flex';
-      item.style.alignItems = 'center';
-      item.style.gap = '0.5rem';
-      item.innerHTML = `<span>💊</span> <strong>${escapeHtml(fullName)}</strong>`;
-      modalList.appendChild(item);
-    });
-  } else {
-    modalList.innerHTML = '<div style="color:var(--text-muted); padding:1rem; text-align:center;">ยังไม่มีผู้จองวันลาในวันนี้</div>';
-  }
-
-  openModal('modalDayDetails');
 }
 
 function openBookingConfirmModal() {
@@ -527,7 +608,10 @@ async function submitLeaveRequest() {
     showToast(res.message || 'บันทึกการลางานสำเร็จ', 'success');
     closeModal('modalBookingConfirm');
     clearSelection();
-    loadCalendar();
+    
+    // Clear client cache and reload calendar
+    Object.keys(clientCalendarCache).forEach(k => delete clientCalendarCache[k]);
+    loadCalendar(true);
   } catch (err) {
     if (window.Swal && (err.message.includes('เกินโควต้า') || err.message.includes('5 วัน'))) {
       Swal.fire({
@@ -601,8 +685,9 @@ async function cancelLeave(requestId) {
   try {
     const res = await callApi('apiCancelLeave', { requestId });
     showToast(res.message || 'ยกเลิกการลาเรียบร้อยแล้ว', 'success');
+    Object.keys(clientCalendarCache).forEach(k => delete clientCalendarCache[k]);
     loadMyLeaves();
-    loadCalendar();
+    loadCalendar(true);
   } catch (err) {
     showToast(err.message, 'error');
   }
