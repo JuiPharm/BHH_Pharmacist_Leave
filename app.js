@@ -319,16 +319,27 @@ function renderCalendarGrid(data) {
     let badgeClass = isPast ? 'status-gray' : `status-${dayData.color || 'green'}`;
     let badgeText = isPast ? 'ผ่านแล้ว' : `${dayData.bookedCount}/${data.dailyCap} คน`;
     if (dayData.isUserBooked) {
-      badgeText = 'ท่านจองแล้ว';
+      badgeText = `ท่านจองแล้ว (${dayData.bookedCount}/${data.dailyCap})`;
       badgeClass = 'status-blue';
     } else if (!isPast && dayData.bookedCount >= data.dailyCap) {
-      badgeText = 'เต็มแล้ว';
+      badgeText = `เต็มแล้ว (${dayData.bookedCount}/${data.dailyCap})`;
       badgeClass = 'status-red';
+    }
+
+    // Generate names preview inside calendar cell
+    let usersHtml = '';
+    if (dayData.bookedUsers && dayData.bookedUsers.length > 0) {
+      dayData.bookedUsers.forEach(name => {
+        usersHtml += `<div class="day-users-preview" title="${escapeHtml(name)}">💊 ${escapeHtml(name)}</div>`;
+      });
     }
 
     cell.innerHTML = `
       <div class="day-number" style="${dateStr === todayYMD ? 'color: var(--primary); font-weight:700;' : ''}">
         ${day} ${dateStr === todayYMD ? '(วันนี้)' : ''}
+      </div>
+      <div class="day-users-container">
+        ${usersHtml}
       </div>
       <div class="day-status ${badgeClass}">
         ${badgeText}

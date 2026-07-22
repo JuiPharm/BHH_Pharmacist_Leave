@@ -316,7 +316,7 @@ body {
 }
 
 .day-cell {
-  aspect-ratio: 1 / 0.95;
+  min-height: 95px;
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -369,6 +369,27 @@ body {
 .day-number {
   font-weight: 600;
   font-size: 0.95rem;
+}
+
+.day-users-container {
+  flex: 1;
+  overflow: hidden;
+  margin: 0.25rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.day-users-preview {
+  font-size: 0.68rem;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .day-status {
