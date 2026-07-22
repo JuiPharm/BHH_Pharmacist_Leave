@@ -400,6 +400,20 @@ function clearSelection() {
   updateSelectionUI();
 }
 
+function generateDateList(startStr, endStr) {
+  const list = [];
+  let curr = new Date(startStr + 'T00:00:00+07:00');
+  const end = new Date(endStr + 'T00:00:00+07:00');
+  while (curr <= end) {
+    const y = curr.getFullYear();
+    const m = String(curr.getMonth() + 1).padStart(2, '0');
+    const d = String(curr.getDate()).padStart(2, '0');
+    list.push(`${y}-${m}-${d}`);
+    curr.setDate(curr.getDate() + 1);
+  }
+  return list;
+}
+
 function showDayDetailsModal(dateStr, dayData) {
   const modalTitle = document.getElementById('modalDayTitle');
   const modalList = document.getElementById('modalDayBookedList');
@@ -433,15 +447,52 @@ function openBookingConfirmModal() {
 
   const start = AppState.selectedStartDate;
   const end = AppState.selectedEndDate || AppState.selectedStartDate;
+  const requestedDates = generateDateList(start, end);
+  const monthKey = start.substring(0, 7);
+
+  let existingCountInMonth = 0;
+  if (calendarDataCache && calendarDataCache.daysMap) {
+    Object.keys(calendarDataCache.daysMap).forEach(d => {
+      if (d.startsWith(monthKey) && calendarDataCache.daysMap[d].isUserBooked) {
+        existingCountInMonth++;
+      }
+    });
+  }
+
+  const newCountInMonth = requestedDates.filter(d => d.startsWith(monthKey)).length;
+  const totalMonthDays = existingCountInMonth + newCountInMonth;
+
+  if (totalMonthDays > 5) {
+    if (window.Swal) {
+      Swal.fire({
+        title: 'แจ้งเตือนโควต้าวันลาเกินกำหนด',
+        html: `
+          <div style="text-align:center; font-family:'Prompt', sans-serif;">
+            <div style="font-size:1.1rem; margin-bottom:0.8rem; color:#f59e0b; font-weight:600;">
+              ⚠️ มีการจองวันลาเกิน 5 วัน สำหรับเดือนนี้
+            </div>
+            <div style="font-size:0.95rem; color:#cbd5e1; line-height:1.6;">
+              ท่านมีวันลาเดิมในเดือนนี้ <strong>${existingCountInMonth} วัน</strong><br>
+              ต้องการจองเพิ่ม <strong>${newCountInMonth} วัน</strong> (รวมเป็น <strong>${totalMonthDays} วัน</strong>)<br>
+              <span style="color:#ef4444; font-weight:600;">(ระบบอนุญาตให้ลางานได้สูงสุด 5 วันต่อเดือน)</span>
+            </div>
+          </div>
+        `,
+        icon: 'warning',
+        background: '#1e293b',
+        color: '#f8fafc',
+        confirmButtonColor: '#3b82f6',
+        confirmButtonText: 'ตกลง'
+      });
+    } else {
+      showToast(`มีการจองวันลาเกิน 5 วัน สำหรับเดือนนี้ (รวม ${totalMonthDays} วัน / โควต้า 5 วัน)`, 'warning');
+    }
+    return;
+  }
 
   document.getElementById('bookStartDate').textContent = start;
   document.getElementById('bookEndDate').textContent = end;
-
-  const d1 = new Date(start + 'T00:00:00+07:00');
-  const d2 = new Date(end + 'T00:00:00+07:00');
-  const diffDays = Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
-
-  document.getElementById('bookTotalDays').textContent = `${diffDays} วัน`;
+  document.getElementById('bookTotalDays').textContent = `${requestedDates.length} วัน`;
   document.getElementById('bookReasonInput').value = '';
 
   openModal('modalBookingConfirm');
@@ -467,7 +518,28 @@ async function submitLeaveRequest() {
     clearSelection();
     loadCalendar();
   } catch (err) {
-    showToast(err.message, 'error');
+    if (window.Swal && (err.message.includes('เกินโควต้า') || err.message.includes('5 วัน'))) {
+      Swal.fire({
+        title: 'แจ้งเตือนโควต้าวันลาเกินกำหนด',
+        html: `
+          <div style="text-align:center; font-family:'Prompt', sans-serif;">
+            <div style="font-size:1.1rem; margin-bottom:0.8rem; color:#f59e0b; font-weight:600;">
+              ⚠️ มีการจองวันลาเกิน 5 วัน สำหรับเดือนนี้
+            </div>
+            <div style="font-size:0.95rem; color:#cbd5e1; line-height:1.6;">
+              ${escapeHtml(err.message)}
+            </div>
+          </div>
+        `,
+        icon: 'warning',
+        background: '#1e293b',
+        color: '#f8fafc',
+        confirmButtonColor: '#3b82f6',
+        confirmButtonText: 'ตกลง'
+      });
+    } else {
+      showToast(err.message, 'error');
+    }
   }
 }
 
