@@ -418,6 +418,16 @@ body {
   text-transform: uppercase;
 }
 
+/* Weekend Day Labels Highlight */
+.calendar-grid .day-label:nth-child(1) {
+  color: #f87171;
+  font-weight: 700;
+}
+.calendar-grid .day-label:nth-child(7) {
+  color: #c084fc;
+  font-weight: 700;
+}
+
 .day-cell {
   min-height: 95px;
   background: rgba(15, 23, 42, 0.5);
@@ -431,6 +441,23 @@ body {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   user-select: none;
+}
+
+/* Weekend Cell Highlights */
+.calendar-grid .day-cell.weekend-sun {
+  background: rgba(244, 63, 94, 0.08);
+  border-color: rgba(244, 63, 94, 0.2);
+}
+.calendar-grid .day-cell.weekend-sun:hover:not(.past-cell) {
+  background: rgba(244, 63, 94, 0.16);
+}
+
+.calendar-grid .day-cell.weekend-sat {
+  background: rgba(168, 85, 247, 0.08);
+  border-color: rgba(168, 85, 247, 0.2);
+}
+.calendar-grid .day-cell.weekend-sat:hover:not(.past-cell) {
+  background: rgba(168, 85, 247, 0.16);
 }
 
 .day-cell:hover:not(.empty-cell):not(.past-cell) {
@@ -461,7 +488,7 @@ body {
 
 .day-cell.selected {
   border: 2px solid var(--primary) !important;
-  background: rgba(59, 130, 246, 0.18) !important;
+  background: rgba(59, 130, 246, 0.22) !important;
   box-shadow: var(--primary-glow) !important;
 }
 
@@ -714,8 +741,7 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* ================= MOBILE UX RESPONSIVE OVERRIDES (< 768px) ================= */
-
+/* MOBILE UX RESPONSIVE OVERRIDES (< 768px) */
 @media (max-width: 768px) {
   .navbar {
     padding: 0.6rem 0.85rem;
@@ -763,7 +789,6 @@ body {
     padding: 0.25rem 0;
   }
 
-  /* Mobile Optimized Calendar Day Cell */
   .day-cell {
     min-height: 68px;
     padding: 0.3rem 0.25rem;
@@ -796,7 +821,6 @@ body {
     gap: 0.5rem;
   }
 
-  /* Mobile Floating Selection Dock */
   .selection-bar {
     position: sticky;
     bottom: 0.75rem;

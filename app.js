@@ -2,7 +2,7 @@
  * Pharmacist Leave Management System - GitHub Pages Frontend JavaScript
  * Uses REST API HTTP POST calls to communicate with Google Apps Script Backend.
  * Features Client-Side RAM Caching for Instant (0ms) Calendar Navigation,
- * Silent Background Revalidation, SweetAlert2 for Full Date Warnings, and No Popups for 1/3 & 2/3 Bookings.
+ * Silent Background Revalidation, SweetAlert2 for Full Date Warnings, and Weekend Cell Highlights.
  */
 
 const AppState = {
@@ -24,9 +24,6 @@ const THAI_MONTHS = [
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
 
-/**
- * Executes REST API HTTP POST calls to GAS Backend (With Loading Spinner).
- */
 async function callApi(action, payload = {}) {
   if (!GAS_API_URL || GAS_API_URL === "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE") {
     showToast('กรุณาระบุ GAS_API_URL ในไฟล์ config.js ก่อนเริ่มใช้งาน', 'error');
@@ -66,9 +63,6 @@ async function callApi(action, payload = {}) {
   }
 }
 
-/**
- * Executes Silent REST API call without blocking UI spinner.
- */
 async function callApiSilent(action, payload = {}) {
   if (!GAS_API_URL) return null;
   try {
@@ -89,9 +83,6 @@ async function callApiSilent(action, payload = {}) {
   return null;
 }
 
-/**
- * Show / Hide Global Spinner Loading Overlay.
- */
 function showLoading(show) {
   const overlay = document.getElementById('spinnerOverlay');
   if (overlay) {
@@ -100,9 +91,6 @@ function showLoading(show) {
   }
 }
 
-/**
- * Toast Notification System.
- */
 function showToast(message, type = 'info') {
   const container = document.getElementById('toastContainer');
   if (!container) return;
@@ -125,9 +113,6 @@ function showToast(message, type = 'info') {
   }, 4000);
 }
 
-/**
- * Escapes unsafe HTML characters.
- */
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)
@@ -138,9 +123,6 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
-/**
- * Navigation View Router.
- */
 function switchView(viewName) {
   AppState.currentView = viewName;
 
@@ -158,9 +140,6 @@ function switchView(viewName) {
   if (viewName === 'admin') loadAdminDashboard();
 }
 
-/**
- * Login Handler.
- */
 async function handleLogin(e) {
   if (e) e.preventDefault();
   const staffId = document.getElementById('loginStaffId').value.trim();
@@ -187,9 +166,6 @@ async function handleLogin(e) {
   }
 }
 
-/**
- * Logout Handler.
- */
 async function handleLogout() {
   if (AppState.token) {
     try {
@@ -206,9 +182,6 @@ async function handleLogout() {
   showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
 }
 
-/**
- * Update Navbar User Status Tag.
- */
 function updateNavbarUser() {
   const navUserBox = document.getElementById('navUserBox');
   const navTabs = document.getElementById('navTabs');
@@ -234,9 +207,6 @@ function updateNavbarUser() {
   }
 }
 
-/**
- * Application Initializer.
- */
 async function initApp() {
   if (AppState.token) {
     try {
@@ -252,7 +222,6 @@ async function initApp() {
   }
 }
 
-// Modal Helpers
 function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) modal.classList.add('show');
@@ -265,13 +234,9 @@ function closeModal(modalId) {
 
 /* ================= CALENDAR & LEAVE BOOKING ================= */
 
-/**
- * Ultra-Fast Instant Client-Side Cached Calendar Loader.
- */
 async function loadCalendar(forceRefresh = false) {
   const cacheKey = `${AppState.calendarYear}_${AppState.calendarMonth}`;
 
-  // Instant 0ms Client Cache Render
   if (!forceRefresh && clientCalendarCache[cacheKey]) {
     calendarDataCache = clientCalendarCache[cacheKey];
     renderCalendarGrid(calendarDataCache);
@@ -354,8 +319,17 @@ function renderCalendarGrid(data) {
     const dateStr = `${data.year}-${String(data.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const dayData = data.daysMap[dateStr] || { bookedCount: 0, bookedUsers: [], isUserBooked: false, color: 'green' };
 
+    const dateObj = new Date(data.year, data.month - 1, day);
+    const dayOfWeek = dateObj.getDay();
+
     const cell = document.createElement('div');
     cell.className = `day-cell`;
+
+    if (dayOfWeek === 0) {
+      cell.classList.add('weekend-sun');
+    } else if (dayOfWeek === 6) {
+      cell.classList.add('weekend-sat');
+    }
 
     const isPast = dateStr < todayYMD;
 
@@ -379,7 +353,6 @@ function renderCalendarGrid(data) {
       badgeClass = 'status-red';
     }
 
-    // Generate names preview inside calendar cell
     let usersHtml = '';
     if (dayData.bookedUsers && dayData.bookedUsers.length > 0) {
       dayData.bookedUsers.forEach(name => {
@@ -412,13 +385,6 @@ function getTodayYMD() {
   return `${y}-${m}-${d}`;
 }
 
-/**
- * Handles Date Cell Click Event.
- * Rules:
- * 1. Past Date -> Show Warning Toast/Alert.
- * 2. Full Date (>= 3/3) -> SweetAlert2 Warning showing list of booked users.
- * 3. 1/3, 2/3, or empty date -> SELECT DATE FOR BOOKING WITHOUT ANY POPUP!
- */
 function handleDayClick(dateStr, dayData) {
   const todayYMD = getTodayYMD();
 
@@ -441,7 +407,6 @@ function handleDayClick(dateStr, dayData) {
 
   const dailyCap = (calendarDataCache && calendarDataCache.dailyCap) || 3;
 
-  // Full date check (3/3) -> SweetAlert2 Alert
   if (dayData.bookedCount >= dailyCap && !dayData.isUserBooked) {
     if (window.Swal) {
       const usersListHtml = dayData.bookedUsers && dayData.bookedUsers.length > 0
@@ -476,7 +441,6 @@ function handleDayClick(dateStr, dayData) {
     return;
   }
 
-  // Day with 0/3, 1/3, 2/3 bookings -> Simply select for booking WITHOUT popup!
   if (!AppState.selectedStartDate || (AppState.selectedStartDate && AppState.selectedEndDate)) {
     AppState.selectedStartDate = dateStr;
     AppState.selectedEndDate = null;
@@ -609,7 +573,6 @@ async function submitLeaveRequest() {
     closeModal('modalBookingConfirm');
     clearSelection();
     
-    // Clear client cache and reload calendar
     Object.keys(clientCalendarCache).forEach(k => delete clientCalendarCache[k]);
     loadCalendar(true);
   } catch (err) {
