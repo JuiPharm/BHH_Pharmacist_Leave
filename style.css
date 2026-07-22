@@ -299,6 +299,7 @@ body {
 .dot-yellow { background-color: var(--warning); box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
 .dot-red { background-color: var(--danger); box-shadow: 0 0 6px rgba(239, 68, 68, 0.5); }
 .dot-blue { background-color: var(--primary); box-shadow: 0 0 6px rgba(59, 130, 246, 0.5); }
+.dot-gray { background-color: #64748b; }
 
 .calendar-grid {
   display: grid;
@@ -329,10 +330,29 @@ body {
   user-select: none;
 }
 
-.day-cell:hover:not(.empty-cell) {
+.day-cell:hover:not(.empty-cell):not(.past-cell) {
   background: var(--bg-card-hover);
   transform: translateY(-2px);
   border-color: rgba(255, 255, 255, 0.25);
+}
+
+.day-cell.past-cell {
+  background: rgba(15, 23, 42, 0.8) !important;
+  color: #475569 !important;
+  opacity: 0.45;
+  cursor: not-allowed !important;
+  border-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+.day-cell.past-cell:hover {
+  transform: none !important;
+  background: rgba(15, 23, 42, 0.8) !important;
+}
+
+.day-cell.past-cell .day-status {
+  background: rgba(71, 85, 105, 0.2) !important;
+  color: #64748b !important;
+  border-color: rgba(71, 85, 105, 0.3) !important;
 }
 
 .day-cell.selected {

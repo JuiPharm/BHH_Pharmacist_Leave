@@ -304,7 +304,11 @@ function renderCalendarGrid(data) {
     const cell = document.createElement('div');
     cell.className = `day-cell`;
 
-    if (AppState.selectedStartDate && AppState.selectedEndDate) {
+    const isPast = dateStr < todayYMD;
+
+    if (isPast) {
+      cell.classList.add('past-cell');
+    } else if (AppState.selectedStartDate && AppState.selectedEndDate) {
       if (dateStr >= AppState.selectedStartDate && dateStr <= AppState.selectedEndDate) {
         cell.classList.add('selected');
       }
@@ -312,12 +316,12 @@ function renderCalendarGrid(data) {
       cell.classList.add('selected');
     }
 
-    let badgeClass = `status-${dayData.color || 'green'}`;
-    let badgeText = `${dayData.bookedCount}/${data.dailyCap} คน`;
+    let badgeClass = isPast ? 'status-gray' : `status-${dayData.color || 'green'}`;
+    let badgeText = isPast ? 'ผ่านแล้ว' : `${dayData.bookedCount}/${data.dailyCap} คน`;
     if (dayData.isUserBooked) {
       badgeText = 'ท่านจองแล้ว';
       badgeClass = 'status-blue';
-    } else if (dayData.bookedCount >= data.dailyCap) {
+    } else if (!isPast && dayData.bookedCount >= data.dailyCap) {
       badgeText = 'เต็มแล้ว';
       badgeClass = 'status-red';
     }
@@ -345,6 +349,13 @@ function getTodayYMD() {
 }
 
 function handleDayClick(dateStr, dayData) {
+  const todayYMD = getTodayYMD();
+
+  if (dateStr < todayYMD) {
+    showToast(`ไม่สามารถเลือกวันที่ในอดีตได้ (${dateStr})`, 'warning');
+    return;
+  }
+
   if (!AppState.selectedStartDate || (AppState.selectedStartDate && AppState.selectedEndDate)) {
     AppState.selectedStartDate = dateStr;
     AppState.selectedEndDate = null;
