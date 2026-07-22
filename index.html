@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ระบบจัดการการลางานเภสัชกร (Pharmacist Leave System)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- App Header / Navbar -->
+  <header class="navbar">
+    <div class="brand">
+      <div class="brand-logo">💊</div>
+      <div>
+        <div style="font-size:1.1rem; line-height:1.2;">ระบบจัดการการลางาน</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); font-weight:400;">Pharmacist Leave Management (GitHub Pages)</div>
+      </div>
+    </div>
+
+    <div class="nav-user" id="navUserBox" style="display:none;">
+      <div class="user-badge">
+        <span id="navUserName">-</span>
+        <span class="role-tag" id="navUserRole">PHARMACIST</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="handleLogout()">ออกจากระบบ</button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs (Shown when logged in) -->
+  <div class="container" style="margin-bottom:0;">
+    <nav class="nav-tabs" id="navTabs" style="display:none;">
+      <button class="tab-btn active" id="tab-calendar" onclick="switchView('calendar')">📅 ปฏิทินวันลา</button>
+      <button class="tab-btn" id="tab-my-leaves" onclick="switchView('my-leaves')">📋 ประวัติการลาของฉัน</button>
+      <button class="tab-btn" id="tab-admin" style="display:none;" onclick="switchView('admin')">⚙️ จัดการระบบ (Admin)</button>
+    </nav>
+  </div>
+
+  <!-- Main Views Container -->
+  <main class="container">
+
+    <!-- VIEW 1: LOGIN -->
+    <section id="view-login" class="view-panel auth-wrapper" style="display:none;">
+      <div class="auth-card">
+        <div class="auth-header">
+          <div class="brand-logo" style="width:54px; height:54px; font-size:1.8rem; margin: 0 auto 1rem auto;">💊</div>
+          <h1 class="auth-title">เข้าสู่ระบบ</h1>
+          <p class="auth-subtitle">ระบบบริหารจัดการวันลาเภสัชกร</p>
+        </div>
+        <form onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label class="form-label" for="loginStaffId">รหัสเจ้าหน้าที่ (Staff ID)</label>
+            <input type="text" id="loginStaffId" class="form-control" placeholder="เช่น P001 หรือ admin" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="loginPassword">รหัสผ่าน (Password)</label>
+            <input type="password" id="loginPassword" class="form-control" placeholder="กรอกรหัสผ่าน" required autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%; padding:0.8rem; margin-top:0.5rem;">
+            เข้าสู่ระบบ ➔
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- VIEW 2: CALENDAR & BOOKING -->
+    <section id="view-calendar" class="view-panel" style="display:none;">
+      <div class="calendar-container">
+        <div class="calendar-header">
+          <div style="display:flex; align-items:center; gap:0.75rem;">
+            <button class="btn btn-secondary btn-sm" onclick="changeMonth(-1)">◄ เดือนก่อนหน้า</button>
+            <h2 class="month-title" id="calendarMonthTitle">-</h2>
+            <button class="btn btn-secondary btn-sm" onclick="changeMonth(1)">เดือนถัดไป ►</button>
+            <button class="btn btn-secondary btn-sm" onclick="goToToday()">วันนี้</button>
+          </div>
+
+          <div class="legend-box">
+            <div class="legend-item"><span class="dot dot-green"></span> ว่าง (0-1 คน)</div>
+            <div class="legend-item"><span class="dot dot-yellow"></span> ใกล้เต็ม (2/3 คน)</div>
+            <div class="legend-item"><span class="dot dot-red"></span> เต็มแล้ว (3/3 คน)</div>
+            <div class="legend-item"><span class="dot dot-blue"></span> วันที่ท่านจอง</div>
+          </div>
+        </div>
+
+        <div id="calendarGrid" class="calendar-grid">
+          <!-- Calendar cells rendered dynamically -->
+        </div>
+
+        <!-- Selection Bar -->
+        <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+          <div id="selectionInfo" style="color:var(--text-muted); font-size:0.9rem;">
+            กรุณาคลิกเลือกวันที่บนปฏิทินเพื่อจองวันลา
+          </div>
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn btn-secondary btn-sm" onclick="clearSelection()">ล้างการเลือก</button>
+            <button id="btnOpenBookingModal" class="btn btn-primary" style="display:none;" onclick="openBookingConfirmModal()">
+              ยื่นคำขอลา ➔
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: MY LEAVES -->
+    <section id="view-my-leaves" class="view-panel" style="display:none;">
+      <div class="calendar-container">
+        <h2 style="font-size:1.3rem; margin-bottom:1rem; font-weight:700;">ประวัติการลางานของฉัน</h2>
+        <div class="table-responsive">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>วันที่เริ่มลา</th>
+                <th>วันที่สิ้นสุด</th>
+                <th>จำนวนวัน</th>
+                <th>เหตุผลการลา</th>
+                <th>สถานะ</th>
+                <th>วันที่ยื่นคำขอ</th>
+                <th>การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="myLeavesTableBody">
+              <!-- Loaded dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: ADMIN DASHBOARD -->
+    <section id="view-admin" class="view-panel" style="display:none;">
+      <!-- Section A: Staff Management -->
+      <div class="calendar-container" style="margin-bottom:1.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+          <h2 style="font-size:1.3rem; font-weight:700;">👥 จัดการบุคลากร (Staff Management)</h2>
+          <button class="btn btn-primary" onclick="openAddStaffModal()">+ เพิ่มบุคลากรใหม่</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>รหัสเจ้าหน้าที่</th>
+                <th>ชื่อ-นามสกุล</th>
+                <th>สิทธิ์ใช้งาน (Role)</th>
+                <th>สถานะบัญชี</th>
+                <th>ลองผิด (Failed)</th>
+                <th>การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="adminStaffTableBody">
+              <!-- Loaded dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Section B: Export & Validation Tools -->
+      <div class="calendar-container" style="margin-bottom:1.5rem;">
+        <h2 style="font-size:1.3rem; font-weight:700; margin-bottom:1rem;">📊 รายงานและการทดสอบระบบ (Reports & Validation Tests)</h2>
+        <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+          <button class="btn btn-secondary" onclick="exportLeaveCSV()">📥 ดาวน์โหลดรายงานการลา (CSV UTF-8 BOM)</button>
+          <button class="btn btn-secondary" onclick="exportAuditLogsCSV()">📥 ดาวน์โหลด Audit Logs (CSV UTF-8 BOM)</button>
+          <button class="btn btn-primary" onclick="runValidationTestsFromUI()">🧪 ประมวลผล Validation Unit Tests</button>
+        </div>
+        <div id="testResultsBox" style="display:none; background:rgba(15,23,42,0.8); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1rem;">
+          <!-- Unit tests results output -->
+        </div>
+      </div>
+
+      <!-- Section C: Audit Logs -->
+      <div class="calendar-container">
+        <h2 style="font-size:1.3rem; font-weight:700; margin-bottom:1rem;">📜 ประวัติการใช้งานระบบ (Audit Logs)</h2>
+        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>เวลา</th>
+                <th>ผู้ใช้งาน</th>
+                <th>การกระทำ (Action)</th>
+                <th>รายละเอียด (Details)</th>
+                <th>IP Address</th>
+              </tr>
+            </thead>
+            <tbody id="adminAuditTableBody">
+              <!-- Loaded dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODALS -->
+
+  <!-- Modal 1: Day Details -->
+  <div id="modalDayDetails" class="modal-backdrop">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalDayTitle">รายชื่อผู้จองวันลา</h3>
+        <button class="modal-close" onclick="closeModal('modalDayDetails')">&times;</button>
+      </div>
+      <div id="modalDayBookedList" style="margin-bottom:1.5rem; max-height:260px; overflow-y:auto;">
+        <!-- Filled dynamically -->
+      </div>
+      <div style="text-align:right;">
+        <button class="btn btn-secondary" onclick="closeModal('modalDayDetails')">ปิดหน้าต่าง</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Create Leave Confirmation -->
+  <div id="modalBookingConfirm" class="modal-backdrop">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">ยืนยันการยื่นคำขอลา</h3>
+        <button class="modal-close" onclick="closeModal('modalBookingConfirm')">&times;</button>
+      </div>
+      <div style="margin-bottom:1rem; font-size:0.95rem; line-height:1.6;">
+        <div><strong>วันที่เริ่มลา:</strong> <span id="bookStartDate">-</span></div>
+        <div><strong>วันที่สิ้นสุด:</strong> <span id="bookEndDate">-</span></div>
+        <div><strong>จำนวนวันรวม:</strong> <span id="bookTotalDays" style="color:var(--primary); font-weight:700;">-</span></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="bookReasonInput">เหตุผลการลา</label>
+        <textarea id="bookReasonInput" class="form-control" rows="3" placeholder="ระบุเหตุผลการลางาน (ถ้ามี)"></textarea>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem;">
+        <button class="btn btn-secondary" onclick="closeModal('modalBookingConfirm')">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="submitLeaveRequest()">ยืนยันการจอง ➔</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Add Staff -->
+  <div id="modalAddStaff" class="modal-backdrop">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">เพิ่มบุคลากรใหม่</h3>
+        <button class="modal-close" onclick="closeModal('modalAddStaff')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">รหัสเจ้าหน้าที่ (Staff ID)</label>
+        <input type="text" id="addStaffId" class="form-control" placeholder="เช่น P002">
+      </div>
+      <div class="form-group">
+        <label class="form-label">ชื่อ-นามสกุล</label>
+        <input type="text" id="addFullName" class="form-control" placeholder="เช่น ภก. สมชาย ใจดี">
+      </div>
+      <div class="form-group">
+        <label class="form-label">สิทธิ์ใช้งาน (Role)</label>
+        <select id="addRole" class="form-control">
+          <option value="PHARMACIST">PHARMACIST (เภสัชกร)</option>
+          <option value="ADMIN">ADMIN (ผู้ดูแลระบบ)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">รหัสผ่านเริ่มต้น</label>
+        <input type="password" id="addPassword" class="form-control" placeholder="กำหนดรหัสผ่าน">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem;">
+        <button class="btn btn-secondary" onclick="closeModal('modalAddStaff')">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="submitAddStaff()">บันทึกข้อมูล</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 4: Reset Password -->
+  <div id="modalResetPassword" class="modal-backdrop">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">รีเซ็ตรหัสผ่าน</h3>
+        <button class="modal-close" onclick="closeModal('modalResetPassword')">&times;</button>
+      </div>
+      <p style="margin-bottom:1rem; font-size:0.9rem; color:var(--text-muted);">
+        รีเซ็ตรหัสผ่านสำหรับ: <strong id="resetTargetName" style="color:var(--text-main);">-</strong>
+      </p>
+      <div class="form-group">
+        <label class="form-label">รหัสผ่านใหม่</label>
+        <input type="password" id="resetNewPassword" class="form-control" placeholder="กรอกรหัสผ่านใหม่อย่างน้อย 6 ตัวอักษร">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem;">
+        <button class="btn btn-secondary" onclick="closeModal('modalResetPassword')">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="submitResetPassword()">ยืนยันการรีเซ็ต</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts & Loading Overlay -->
+  <div id="toastContainer" class="toast-container"></div>
+  <div id="spinnerOverlay" class="spinner-overlay">
+    <div class="spinner"></div>
+    <div style="font-weight:500;">กำลังประมวลผล...</div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
