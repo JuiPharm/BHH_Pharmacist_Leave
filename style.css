@@ -854,3 +854,89 @@ body {
     max-width: none;
   }
 }
+/* ===== Android vertical scrolling fix ===== */
+html {
+  width: 100%;
+  min-height: 100%;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+main.container,
+.view-panel,
+.calendar-container {
+  min-width: 0;
+  height: auto;
+  overflow-y: visible;
+  touch-action: pan-y;
+}
+
+.calendar-grid,
+.day-cell {
+  touch-action: pan-y;
+}
+
+.nav-tabs,
+.table-responsive {
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-backdrop {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-content {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 768px) {
+  body {
+    display: block;
+    background-attachment: scroll;
+  }
+
+  .navbar {
+    height: auto;
+    flex-wrap: wrap;
+  }
+
+  main.container {
+    width: 100%;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    overflow: visible;
+  }
+
+  .calendar-header > div:first-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .month-title {
+    width: 100%;
+    order: -1;
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+  }
+}
