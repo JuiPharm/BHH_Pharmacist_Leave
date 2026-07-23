@@ -25,7 +25,7 @@ const THAI_MONTHS = [
 ];
 
 async function callApi(action, payload = {}) {
-  if (!GAS_API_URL || GAS_API_URL === "https://script.google.com/macros/s/AKfycbwzhBI3vd2qElmSBlzn2m98gjo3PCSbUh7efDaRmeerJ_Pf53P3jy-jytMrZYkwUD3A8g/exec") {
+  if (!GAS_API_URL) {
     showToast('กรุณาระบุ GAS_API_URL ในไฟล์ config.js ก่อนเริ่มใช้งาน', 'error');
     throw new Error('GAS_API_URL is not configured');
   }
@@ -50,8 +50,8 @@ async function callApi(action, payload = {}) {
     if (data && data.success) {
       return data;
     } else {
-      const errorMsg = data && data.error ? data.error : 'เกิดข้อผิดพลาดในการประมวลผล';
-      if (errorMsg.includes('เซสชันหมดอายุ') || errorMsg.includes('การเชื่อมต่อหมดอายุ')) {
+      const errorMsg = data && (data.error || data.message) ? (data.error || data.message) : 'เกิดข้อผิดพลาดในการประมวลผล';
+      if (errorMsg.includes('เซสชันหมดอายุ') || errorMsg.includes('การเชื่อมต่อหมดอายุ') || errorMsg.includes('กรุณาเข้าสู่ระบบ')) {
         handleLogout();
       }
       throw new Error(errorMsg);
@@ -92,6 +92,19 @@ function showLoading(show) {
 }
 
 function showToast(message, type = 'info') {
+  if (window.Swal) {
+    const icon = type === 'success' ? 'success' : (type === 'error' ? 'error' : 'info');
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: icon,
+      title: message,
+      showConfirmButton: false,
+      timer: 3000
+    });
+    return;
+  }
+
   const container = document.getElementById('toastContainer');
   if (!container) return;
 
@@ -317,10 +330,12 @@ function renderCalendarGrid(data) {
 
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${data.year}-${String(data.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const dayData = data.daysMap[dateStr] || { bookedCount: 0, bookedUsers: [], isUserBooked: false, color: 'green' };
-
     const dateObj = new Date(data.year, data.month - 1, day);
     const dayOfWeek = dateObj.getDay();
+
+    // Wednesday Cap = 2, Other days = 3 (or data.dailyCap)
+    const dateCap = (dayOfWeek === 3) ? (data.wednesdayCap || 2) : (data.dailyCap || 3);
+    const dayData = data.daysMap[dateStr] || { bookedCount: 0, bookedUsers: [], isUserBooked: false, color: 'green' };
 
     const cell = document.createElement('div');
     cell.className = `day-cell`;
@@ -335,6 +350,9 @@ function renderCalendarGrid(data) {
 
     if (isPast) {
       cell.classList.add('past-cell');
+      cell.setAttribute('disabled', 'disabled');
+      cell.style.pointerEvents = 'none';
+      cell.style.opacity = '0.55';
     } else if (AppState.selectedStartDate && AppState.selectedEndDate) {
       if (dateStr >= AppState.selectedStartDate && dateStr <= AppState.selectedEndDate) {
         cell.classList.add('selected');
@@ -344,12 +362,12 @@ function renderCalendarGrid(data) {
     }
 
     let badgeClass = isPast ? 'status-gray' : `status-${dayData.color || 'green'}`;
-    let badgeText = isPast ? 'ผ่านแล้ว' : `${dayData.bookedCount}/${data.dailyCap} คน`;
+    let badgeText = isPast ? 'ผ่านแล้ว' : `${dayData.bookedCount}/${dateCap} คน`;
     if (dayData.isUserBooked) {
-      badgeText = `ท่านจองแล้ว (${dayData.bookedCount}/${data.dailyCap})`;
+      badgeText = `ท่านจองแล้ว (${dayData.bookedCount}/${dateCap})`;
       badgeClass = 'status-blue';
-    } else if (!isPast && dayData.bookedCount >= data.dailyCap) {
-      badgeText = `เต็มแล้ว (${dayData.bookedCount}/${data.dailyCap})`;
+    } else if (!isPast && dayData.bookedCount >= dateCap) {
+      badgeText = `เต็มแล้ว (${dayData.bookedCount}/${dateCap})`;
       badgeClass = 'status-red';
     }
 
@@ -372,7 +390,9 @@ function renderCalendarGrid(data) {
       </div>
     `;
 
-    cell.onclick = () => handleDayClick(dateStr, dayData);
+    if (!isPast) {
+      cell.onclick = () => handleDayClick(dateStr, dayData, dateCap);
+    }
     grid.appendChild(cell);
   }
 }
@@ -385,7 +405,7 @@ function getTodayYMD() {
   return `${y}-${m}-${d}`;
 }
 
-function handleDayClick(dateStr, dayData) {
+function handleDayClick(dateStr, dayData, dateCap) {
   const todayYMD = getTodayYMD();
 
   if (dateStr < todayYMD) {
@@ -405,9 +425,9 @@ function handleDayClick(dateStr, dayData) {
     return;
   }
 
-  const dailyCap = (calendarDataCache && calendarDataCache.dailyCap) || 3;
+  const limitCap = dateCap || ((calendarDataCache && calendarDataCache.dailyCap) || 3);
 
-  if (dayData.bookedCount >= dailyCap && !dayData.isUserBooked) {
+  if (dayData.bookedCount >= limitCap && !dayData.isUserBooked) {
     if (window.Swal) {
       const usersListHtml = dayData.bookedUsers && dayData.bookedUsers.length > 0
         ? dayData.bookedUsers.map(u => `<div style="font-size:0.9rem; color:#f8fafc; margin-top:0.25rem;">💊 ${escapeHtml(u)}</div>`).join('')
@@ -421,7 +441,7 @@ function handleDayClick(dateStr, dayData) {
               🚫 ไม่สามารถเลือกวันที่ ${dateStr} ได้
             </div>
             <div style="font-size:0.95rem; color:#cbd5e1; line-height:1.6; margin-bottom:0.8rem;">
-              วันที่นี้มีผู้จองวันลาครบกำหนดแล้ว <strong>(${dayData.bookedCount}/${dailyCap} คน)</strong>
+              วันที่นี้มีผู้จองวันลาครบกำหนดแล้ว <strong>(${dayData.bookedCount}/${limitCap} คน)</strong>
             </div>
             <div style="background:rgba(255,255,255,0.05); padding:0.8rem; border-radius:8px; text-align:left;">
               <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.4rem;">รายชื่อผู้จองวันลาในวันนี้:</div>
@@ -436,7 +456,7 @@ function handleDayClick(dateStr, dayData) {
         confirmButtonText: 'ตกลง'
       });
     } else {
-      showToast(`วันที่ ${dateStr} มีผู้จองเต็มแล้ว (${dayData.bookedCount}/${dailyCap} คน)`, 'warning');
+      showToast(`วันที่ ${dateStr} มีผู้จองเต็มแล้ว (${dayData.bookedCount}/${limitCap} คน)`, 'warning');
     }
     return;
   }
@@ -504,32 +524,45 @@ function openBookingConfirmModal() {
   const start = AppState.selectedStartDate;
   const end = AppState.selectedEndDate || AppState.selectedStartDate;
   const requestedDates = generateDateList(start, end);
-  const monthKey = start.substring(0, 7);
 
-  let existingCountInMonth = 0;
-  if (calendarDataCache && calendarDataCache.daysMap) {
-    Object.keys(calendarDataCache.daysMap).forEach(d => {
-      if (d.startsWith(monthKey) && calendarDataCache.daysMap[d].isUserBooked) {
-        existingCountInMonth++;
-      }
-    });
-  }
+  // Per-month quota validation check
+  const requestedByMonth = {};
+  requestedDates.forEach(d => {
+    const m = d.substring(0, 7);
+    if (!requestedByMonth[m]) requestedByMonth[m] = 0;
+    requestedByMonth[m]++;
+  });
 
-  const newCountInMonth = requestedDates.filter(d => d.startsWith(monthKey)).length;
-  const totalMonthDays = existingCountInMonth + newCountInMonth;
+  let quotaExceededMonth = null;
+  let exceededTotalDays = 0;
 
-  if (totalMonthDays > 5) {
+  Object.keys(requestedByMonth).forEach(monthKey => {
+    let existingCountInMonth = 0;
+    if (calendarDataCache && calendarDataCache.daysMap) {
+      Object.keys(calendarDataCache.daysMap).forEach(d => {
+        if (d.startsWith(monthKey) && calendarDataCache.daysMap[d].isUserBooked) {
+          existingCountInMonth++;
+        }
+      });
+    }
+    const totalMonthDays = existingCountInMonth + requestedByMonth[monthKey];
+    if (totalMonthDays > 5) {
+      quotaExceededMonth = monthKey;
+      exceededTotalDays = totalMonthDays;
+    }
+  });
+
+  if (quotaExceededMonth) {
     if (window.Swal) {
       Swal.fire({
         title: 'แจ้งเตือนโควต้าวันลาเกินกำหนด',
         html: `
           <div style="text-align:center; font-family:'Prompt', sans-serif;">
             <div style="font-size:1.1rem; margin-bottom:0.8rem; color:#f59e0b; font-weight:600;">
-              ⚠️ มีการจองวันลาเกิน 5 วัน สำหรับเดือนนี้
+              ⚠️ มีการจองวันลาเกิน 5 วัน สำหรับเดือน ${quotaExceededMonth}
             </div>
             <div style="font-size:0.95rem; color:#cbd5e1; line-height:1.6;">
-              ท่านมีวันลาเดิมในเดือนนี้ <strong>${existingCountInMonth} วัน</strong><br>
-              ต้องการจองเพิ่ม <strong>${newCountInMonth} วัน</strong> (รวมเป็น <strong>${totalMonthDays} วัน</strong>)<br>
+              รวมวันลาในเดือนนี้เป็น <strong>${exceededTotalDays} วัน</strong><br>
               <span style="color:#ef4444; font-weight:600;">(ระบบอนุญาตให้ลางานได้สูงสุด 5 วันต่อเดือน)</span>
             </div>
           </div>
@@ -541,7 +574,7 @@ function openBookingConfirmModal() {
         confirmButtonText: 'ตกลง'
       });
     } else {
-      showToast(`มีการจองวันลาเกิน 5 วัน สำหรับเดือนนี้ (รวม ${totalMonthDays} วัน / โควต้า 5 วัน)`, 'warning');
+      showToast(`มีการจองวันลาเกิน 5 วัน ในเดือน ${quotaExceededMonth} (รวม ${exceededTotalDays} วัน)`, 'warning');
     }
     return;
   }
@@ -575,6 +608,7 @@ async function submitLeaveRequest() {
     
     Object.keys(clientCalendarCache).forEach(k => delete clientCalendarCache[k]);
     loadCalendar(true);
+    if (AppState.currentView === 'my-leaves') loadMyLeaves();
   } catch (err) {
     if (window.Swal && (err.message.includes('เกินโควต้า') || err.message.includes('5 วัน'))) {
       Swal.fire({
@@ -582,7 +616,7 @@ async function submitLeaveRequest() {
         html: `
           <div style="text-align:center; font-family:'Prompt', sans-serif;">
             <div style="font-size:1.1rem; margin-bottom:0.8rem; color:#f59e0b; font-weight:600;">
-              ⚠️ มีการจองวันลาเกิน 5 วัน สำหรับเดือนนี้
+              ⚠️ มีการจองวันลาเกิน 5 วัน
             </div>
             <div style="font-size:0.95rem; color:#cbd5e1; line-height:1.6;">
               ${escapeHtml(err.message)}
@@ -643,7 +677,23 @@ async function loadMyLeaves() {
 }
 
 async function cancelLeave(requestId) {
-  if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการยกเลิกรายการลานี้?')) return;
+  if (window.Swal) {
+    const result = await Swal.fire({
+      title: 'ยืนยันการยกเลิก?',
+      text: 'คุณแน่ใจหรือไม่ว่าต้องการยกเลิกรายการลานี้',
+      icon: 'warning',
+      background: '#1e293b',
+      color: '#f8fafc',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'ยืนยันยกเลิก',
+      cancelButtonText: 'ถอยกลับ'
+    });
+    if (!result.isConfirmed) return;
+  } else {
+    if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการยกเลิกรายการลานี้?')) return;
+  }
 
   try {
     const res = await callApi('apiCancelLeave', { requestId });
@@ -702,7 +752,7 @@ async function loadStaffList() {
         <td>${u.full_name}</td>
         <td><span class="role-tag role-${u.role.toLowerCase()}">${u.role}</span></td>
         <td>${statusTag}</td>
-        <td>${u.failed_login_attempts} / 5</td>
+        <td>${u.failed_login_attempts || 0} / 5</td>
         <td style="display:flex; gap:0.4rem; flex-wrap:wrap;">${toggleBtn} ${resetBtn}</td>
       `;
       tbody.appendChild(tr);
@@ -833,7 +883,7 @@ async function exportAuditLogsCSV() {
 }
 
 function triggerCSVDownload(csvContent, filename) {
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
   link.setAttribute('href', url);
