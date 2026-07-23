@@ -5,6 +5,18 @@
  * Silent Background Revalidation, SweetAlert2 for Full Date Warnings, and Weekend Cell Highlights.
  */
 
+const FALLBACK_GAS_API_URL = "https://script.google.com/macros/s/AKfycbwzhBI3vd2qElmSBlzn2m98gjo3PCSbUh7efDaRmeerJ_Pf53P3jy-jytMrZYkwUD3A8g/exec";
+
+function getEffectiveApiUrl() {
+  if (typeof GAS_API_URL !== 'undefined' && GAS_API_URL && String(GAS_API_URL).trim()) {
+    return String(GAS_API_URL).trim();
+  }
+  if (typeof window !== 'undefined' && window.GAS_API_URL && String(window.GAS_API_URL).trim()) {
+    return String(window.GAS_API_URL).trim();
+  }
+  return FALLBACK_GAS_API_URL;
+}
+
 const AppState = {
   token: localStorage.getItem('SESSION_TOKEN') || '',
   user: null,
@@ -25,14 +37,11 @@ const THAI_MONTHS = [
 ];
 
 async function callApi(action, payload = {}) {
-  if (!GAS_API_URL) {
-    showToast('กรุณาระบุ GAS_API_URL ในไฟล์ config.js ก่อนเริ่มใช้งาน', 'error');
-    throw new Error('GAS_API_URL is not configured');
-  }
+  const targetUrl = getEffectiveApiUrl();
 
   showLoading(true);
   try {
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
@@ -64,9 +73,9 @@ async function callApi(action, payload = {}) {
 }
 
 async function callApiSilent(action, payload = {}) {
-  if (!GAS_API_URL) return null;
+  const targetUrl = getEffectiveApiUrl();
   try {
-    const response = await fetch(GAS_API_URL, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
