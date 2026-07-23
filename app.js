@@ -25,7 +25,7 @@ const THAI_MONTHS = [
 ];
 
 async function callApi(action, payload = {}) {
-  if (!GAS_API_URL || GAS_API_URL === "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE") {
+  if (!GAS_API_URL || GAS_API_URL === "https://script.google.com/macros/s/AKfycbwzhBI3vd2qElmSBlzn2m98gjo3PCSbUh7efDaRmeerJ_Pf53P3jy-jytMrZYkwUD3A8g/exec") {
     showToast('กรุณาระบุ GAS_API_URL ในไฟล์ config.js ก่อนเริ่มใช้งาน', 'error');
     throw new Error('GAS_API_URL is not configured');
   }
