@@ -885,9 +885,19 @@ main.container,
   touch-action: pan-y;
 }
 
+.calendar-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x pan-y;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .calendar-grid,
 .day-cell {
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
 }
 
 .nav-tabs,
@@ -929,6 +939,16 @@ main.container,
   .calendar-header > div:first-child {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .calendar-grid {
+    width: 720px;
+    min-width: 720px;
+    grid-template-columns: repeat(7, minmax(96px, 1fr));
+  }
+
+  .day-cell {
+    min-width: 0;
   }
 
   .month-title {
