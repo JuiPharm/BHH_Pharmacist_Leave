@@ -145,6 +145,21 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+/**
+ * คืนค่า Staff ID ของผู้ใช้ที่ Login
+ * รองรับชื่อ property ทั้ง staff_id และ staffId
+ * และใช้ค่าที่บันทึกไว้ใน localStorage เป็น fallback หลัง Refresh
+ */
+function getLoggedInStaffId(user) {
+  const savedStaffId = localStorage.getItem('SESSION_STAFF_ID') || '';
+
+  return String(
+    (user && (user.staff_id || user.staffId)) ||
+    savedStaffId ||
+    '-'
+  ).trim();
+}
+
 function switchView(viewName) {
   AppState.currentView = viewName;
 
@@ -164,6 +179,7 @@ function switchView(viewName) {
 
 async function handleLogin(e) {
   if (e) e.preventDefault();
+
   const staffId = document.getElementById('loginStaffId').value.trim();
   const password = document.getElementById('loginPassword').value.trim();
 
@@ -174,17 +190,27 @@ async function handleLogin(e) {
 
   try {
     const res = await callApi('apiLogin', { staffId, password });
+
     AppState.token = res.token;
-    AppState.user = res.user;
+    AppState.user = res.user || {};
+
+    // กรณี Backend ไม่ได้ส่ง staff_id กลับมา ให้ใช้ค่าที่กรอกตอน Login
+    if (!AppState.user.staff_id && !AppState.user.staffId) {
+      AppState.user.staff_id = staffId;
+    }
+
+    const loggedInStaffId = getLoggedInStaffId(AppState.user);
+
     localStorage.setItem('SESSION_TOKEN', res.token);
-    
+    localStorage.setItem('SESSION_STAFF_ID', loggedInStaffId);
+
     updateNavbarUser();
-    showToast(`เข้าสู่ระบบสำเร็จ ยินดีต้อนรับ ${res.user.full_name}`, 'success');
+    showToast(`เข้าสู่ระบบสำเร็จ ยินดีต้อนรับ ${loggedInStaffId}`, 'success');
 
     document.getElementById('loginPassword').value = '';
     switchView('calendar');
   } catch (err) {
-    showToast(err.message, 'error');
+    showToast(err.message || 'ไม่สามารถเข้าสู่ระบบได้', 'error');
   }
 }
 
@@ -197,6 +223,7 @@ async function handleLogout() {
   AppState.token = '';
   AppState.user = null;
   localStorage.removeItem('SESSION_TOKEN');
+  localStorage.removeItem('SESSION_STAFF_ID');
   Object.keys(clientCalendarCache).forEach(k => delete clientCalendarCache[k]);
 
   updateNavbarUser();
@@ -208,24 +235,35 @@ function updateNavbarUser() {
   const navUserBox = document.getElementById('navUserBox');
   const navTabs = document.getElementById('navTabs');
   const adminTab = document.getElementById('tab-admin');
+  const navUserName = document.getElementById('navUserName');
+  const roleTag = document.getElementById('navUserRole');
 
   if (AppState.user) {
-    navUserBox.style.display = 'flex';
-    navTabs.style.display = 'flex';
+    if (navUserBox) navUserBox.style.display = 'flex';
+    if (navTabs) navTabs.style.display = 'flex';
 
-    document.getElementById('navUserName').textContent = AppState.user.full_name;
-    const roleTag = document.getElementById('navUserRole');
-    roleTag.textContent = AppState.user.role === 'ADMIN' ? 'ผู้ดูแลระบบ (ADMIN)' : 'เภสัชกร (PHARMACIST)';
-    roleTag.className = `role-tag role-${AppState.user.role.toLowerCase()}`;
+    // แสดง Staff ID แทนชื่อผู้ใช้
+    if (navUserName) {
+      navUserName.textContent = getLoggedInStaffId(AppState.user);
+    }
 
-    if (AppState.user.role === 'ADMIN') {
-      if (adminTab) adminTab.style.display = 'block';
-    } else {
-      if (adminTab) adminTab.style.display = 'none';
+    const role = String(AppState.user.role || 'PHARMACIST').toUpperCase();
+
+    if (roleTag) {
+      roleTag.textContent = role === 'ADMIN'
+        ? 'ผู้ดูแลระบบ (ADMIN)'
+        : 'เภสัชกร (PHARMACIST)';
+      roleTag.className = `role-tag role-${role.toLowerCase()}`;
+    }
+
+    if (adminTab) {
+      adminTab.style.display = role === 'ADMIN' ? 'block' : 'none';
     }
   } else {
-    navUserBox.style.display = 'none';
-    navTabs.style.display = 'none';
+    if (navUserBox) navUserBox.style.display = 'none';
+    if (navTabs) navTabs.style.display = 'none';
+    if (adminTab) adminTab.style.display = 'none';
+    if (navUserName) navUserName.textContent = '-';
   }
 }
 
@@ -233,7 +271,14 @@ async function initApp() {
   if (AppState.token) {
     try {
       const res = await callApi('apiGetSessionUser');
-      AppState.user = res.user;
+      AppState.user = res.user || {};
+
+      // ใช้ Staff ID ที่บันทึกไว้ หาก Session API ไม่ส่งกลับมา
+      if (!AppState.user.staff_id && !AppState.user.staffId) {
+        const savedStaffId = localStorage.getItem('SESSION_STAFF_ID');
+        if (savedStaffId) AppState.user.staff_id = savedStaffId;
+      }
+
       updateNavbarUser();
       switchView('calendar');
     } catch (e) {
