@@ -165,7 +165,9 @@ let calendarRequestSeq = 0;
 let loadingRequestCount = 0;
 
 // Near-real-time calendar synchronization.
-const CALENDAR_SYNC_INTERVAL_MS = 5000;
+// Poll a lightweight revision only while the Calendar view is visible.
+ // 15 seconds reduces Apps Script request volume by ~67% vs 5-second polling.
+const CALENDAR_SYNC_INTERVAL_MS = 15000;
 let calendarKnownRevision = null;
 let calendarSyncTimer = null;
 let calendarSyncBusy = false;
@@ -238,6 +240,11 @@ async function callApi(action, payload = {}) {
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
+        /*
+         * Intentionally text/plain.
+         * Google Apps Script reads e.postData.contents and JSON.parse()s it.
+         * Keeping this a CORS simple request avoids an application/json preflight.
+         */
         'Content-Type': 'text/plain;charset=utf-8'
       },
       body: JSON.stringify({
@@ -289,6 +296,11 @@ async function callApiSilent(action, payload = {}) {
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
+        /*
+         * Intentionally text/plain.
+         * Google Apps Script reads e.postData.contents and JSON.parse()s it.
+         * Keeping this a CORS simple request avoids an application/json preflight.
+         */
         'Content-Type': 'text/plain;charset=utf-8'
       },
       body: JSON.stringify({
@@ -451,7 +463,8 @@ function escapeHtml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/'/g, '&#039;')
+    .replace(/`/g, '&#96;');
 }
 
 
@@ -471,6 +484,11 @@ function closeModal(modalId) {
 
   if (modal) {
     modal.classList.remove('show');
+  }
+
+  // Prevent a stale target user ID from surviving after the reset modal closes.
+  if (modalId === 'modalResetPassword') {
+    selectedTargetUserId = null;
   }
 }
 
@@ -589,6 +607,16 @@ function stopCalendarAutoSync() {
 }
 
 
+function shouldCheckCalendarSync() {
+  return Boolean(
+    AppState.token &&
+    AppState.user &&
+    AppState.currentView === 'calendar' &&
+    document.visibilityState === 'visible'
+  );
+}
+
+
 function startCalendarAutoSync() {
   stopCalendarAutoSync();
 
@@ -653,9 +681,8 @@ async function refreshCurrentCalendarSilently() {
 
 async function checkCalendarRevisionAndRefresh() {
   if (
-    !AppState.token ||
-    calendarSyncBusy ||
-    document.visibilityState === 'hidden'
+    !shouldCheckCalendarSync() ||
+    calendarSyncBusy
   ) {
     return;
   }
@@ -3615,6 +3642,20 @@ function openResetPasswordModal(
 
 
 async function submitResetPassword() {
+  // Capture the target once so a later modal state change cannot redirect the request.
+  const targetUserId =
+    String(
+      selectedTargetUserId || ''
+    ).trim();
+
+  if (!targetUserId) {
+    showToast(
+      'ไม่พบผู้ใช้ที่ต้องการรีเซ็ตรหัสผ่าน กรุณาเลือกผู้ใช้อีกครั้ง',
+      'error'
+    );
+    return;
+  }
+
   const input =
     document.getElementById(
       'resetNewPassword'
@@ -3642,11 +3683,14 @@ async function submitResetPassword() {
         'apiResetUserPassword',
         {
           targetUserId:
-            selectedTargetUserId,
+            targetUserId,
           newPassword:
             newPassword
         }
       );
+
+    // Clear state before any later UI work.
+    selectedTargetUserId = null;
 
     showToast(
       res.message ||
@@ -4006,10 +4050,7 @@ async function runValidationTestsFromUI() {
 document.addEventListener(
   'visibilitychange',
   () => {
-    if (
-      document.visibilityState === 'visible' &&
-      AppState.token
-    ) {
+    if (shouldCheckCalendarSync()) {
       void checkCalendarRevisionAndRefresh();
     }
   }
@@ -4018,13 +4059,37 @@ document.addEventListener(
 window.addEventListener(
   'focus',
   () => {
-    if (AppState.token) {
+    if (shouldCheckCalendarSync()) {
       void checkCalendarRevisionAndRefresh();
     }
   }
 );
 
-window.addEventListener(
-  'DOMContentLoaded',
-  initApp
-);
+
+/*
+ * Robust application boot:
+ * - Normal script: waits for DOMContentLoaded.
+ * - async/dynamically injected script loaded after DOMContentLoaded:
+ *   starts immediately.
+ * - once/idempotent guard prevents double initialization.
+ */
+let applicationBootStarted = false;
+
+function bootApplication() {
+  if (applicationBootStarted) {
+    return;
+  }
+
+  applicationBootStarted = true;
+  void initApp();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener(
+    'DOMContentLoaded',
+    bootApplication,
+    { once: true }
+  );
+} else {
+  bootApplication();
+}
