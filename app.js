@@ -78,43 +78,11 @@ function normalizeFrontendYmd(value) {
     return text;
   }
 
-  // ISO / database datetime text.
+  // Backend may occasionally return datetime text.
   const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
 
   if (match) {
     return match[1];
-  }
-
-  /*
-   * Legacy Apps Script route may return String(Date), for example:
-   * "Thu Sep 10 2026 00:00:00 GMT+0700 (Indochina Time)"
-   *
-   * Parse it and format explicitly in Asia/Bangkok.
-   */
-  if (text) {
-    const parsed = new Date(text);
-
-    if (!Number.isNaN(parsed.getTime())) {
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Bangkok',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
-
-      const parts = formatter.formatToParts(parsed);
-      const map = {};
-
-      parts.forEach(part => {
-        if (part.type !== 'literal') {
-          map[part.type] = part.value;
-        }
-      });
-
-      if (map.year && map.month && map.day) {
-        return `${map.year}-${map.month}-${map.day}`;
-      }
-    }
   }
 
   return text;
@@ -195,6 +163,12 @@ const clientCalendarCache = {};
 let selectedTargetUserId = null;
 let calendarRequestSeq = 0;
 let loadingRequestCount = 0;
+
+// Near-real-time calendar synchronization.
+const CALENDAR_SYNC_INTERVAL_MS = 5000;
+let calendarKnownRevision = null;
+let calendarSyncTimer = null;
+let calendarSyncBusy = false;
 
 
 const THAI_MONTHS = [
@@ -328,6 +302,20 @@ async function callApiSilent(action, payload = {}) {
 
     if (data && data.success) {
       return data;
+    }
+
+    if (data) {
+      const error = createApiError(
+        data,
+        'เกิดข้อผิดพลาดในการประมวลผล'
+      );
+
+      if (isSessionError(error)) {
+        void handleLogout({
+          notify: false,
+          callBackend: false
+        });
+      }
     }
 
   } catch (err) {
@@ -560,6 +548,159 @@ function getLoggedInStaffId(user) {
 }
 
 
+function isAdminUser() {
+  return String(
+    AppState.user && AppState.user.role
+      ? AppState.user.role
+      : ''
+  )
+    .trim()
+    .toUpperCase() === 'ADMIN';
+}
+
+
+function rememberCalendarRevision(revision) {
+  if (
+    revision !== undefined &&
+    revision !== null &&
+    String(revision).trim()
+  ) {
+    calendarKnownRevision = String(revision);
+  }
+}
+
+
+function clearCalendarClientCache() {
+  Object
+    .keys(clientCalendarCache)
+    .forEach(key => {
+      delete clientCalendarCache[key];
+    });
+}
+
+
+function stopCalendarAutoSync() {
+  if (calendarSyncTimer) {
+    clearInterval(calendarSyncTimer);
+    calendarSyncTimer = null;
+  }
+
+  calendarSyncBusy = false;
+}
+
+
+function startCalendarAutoSync() {
+  stopCalendarAutoSync();
+
+  if (!AppState.token) {
+    return;
+  }
+
+  calendarSyncTimer = setInterval(
+    () => {
+      void checkCalendarRevisionAndRefresh();
+    },
+    CALENDAR_SYNC_INTERVAL_MS
+  );
+
+  // Check once immediately after login/session restore.
+  void checkCalendarRevisionAndRefresh();
+}
+
+
+async function refreshCurrentCalendarSilently() {
+  if (!AppState.token) {
+    return;
+  }
+
+  const year = AppState.calendarYear;
+  const month = AppState.calendarMonth;
+  const cacheKey = `${year}_${month}`;
+  const requestSeq = ++calendarRequestSeq;
+
+  const res = await callApiSilent(
+    'apiGetCalendarData',
+    {
+      year: year,
+      month: month
+    }
+  );
+
+  if (!res || !res.data) {
+    return;
+  }
+
+  rememberCalendarRevision(res.revision);
+  clientCalendarCache[cacheKey] = res.data;
+
+  if (
+    !isCurrentCalendarRequest(
+      requestSeq,
+      year,
+      month
+    )
+  ) {
+    return;
+  }
+
+  calendarDataCache = res.data;
+
+  if (AppState.currentView === 'calendar') {
+    renderCalendarGrid(res.data);
+  }
+}
+
+
+async function checkCalendarRevisionAndRefresh() {
+  if (
+    !AppState.token ||
+    calendarSyncBusy ||
+    document.visibilityState === 'hidden'
+  ) {
+    return;
+  }
+
+  calendarSyncBusy = true;
+
+  try {
+    const res = await callApiSilent(
+      'apiGetCalendarRevision'
+    );
+
+    if (
+      !res ||
+      res.revision === undefined ||
+      res.revision === null
+    ) {
+      return;
+    }
+
+    const latestRevision = String(res.revision);
+
+    if (calendarKnownRevision === null) {
+      calendarKnownRevision = latestRevision;
+      return;
+    }
+
+    if (latestRevision === calendarKnownRevision) {
+      return;
+    }
+
+    calendarKnownRevision = latestRevision;
+    clearCalendarClientCache();
+
+    // The server revision changed because another leave was created,
+    // edited, or cancelled. Reload the visible month without a spinner.
+    if (AppState.currentView === 'calendar') {
+      await refreshCurrentCalendarSilently();
+    }
+
+  } finally {
+    calendarSyncBusy = false;
+  }
+}
+
+
 function switchView(viewName) {
   AppState.currentView =
     viewName;
@@ -699,6 +840,7 @@ async function handleLogin(e) {
       .value = '';
 
     switchView('calendar');
+    startCalendarAutoSync();
 
   } catch (err) {
     showToast(
@@ -729,6 +871,9 @@ async function handleLogout(options = {}) {
       // Logout should always clear local state.
     }
   }
+
+  stopCalendarAutoSync();
+  calendarKnownRevision = null;
 
   AppState.token = '';
   AppState.user = null;
@@ -890,6 +1035,7 @@ async function initApp() {
 
     updateNavbarUser();
     switchView('calendar');
+    startCalendarAutoSync();
 
   } catch (_) {
     await handleLogout({
@@ -969,6 +1115,10 @@ async function loadCalendar(
       );
     }
 
+    rememberCalendarRevision(
+      res.revision
+    );
+
     clientCalendarCache[cacheKey] =
       res.data;
 
@@ -1027,6 +1177,10 @@ async function fetchCalendarDataInBackground(
   ) {
     return;
   }
+
+  rememberCalendarRevision(
+    res.revision
+  );
 
   clientCalendarCache[cacheKey] =
     res.data;
@@ -1263,16 +1417,22 @@ function renderCalendarGrid(data) {
         'past-cell'
       );
 
-      cell.setAttribute(
-        'disabled',
-        'disabled'
-      );
+      if (!isAdminUser()) {
+        cell.setAttribute(
+          'disabled',
+          'disabled'
+        );
 
-      cell.style.pointerEvents =
-        'none';
+        cell.style.pointerEvents =
+          'none';
 
-      cell.style.opacity =
-        '0.55';
+        cell.style.opacity =
+          '0.55';
+      } else {
+        // Admin still needs the management button on historical ACTIVE rows.
+        cell.style.opacity =
+          '0.75';
+      }
 
     } else if (
       AppState.selectedStartDate &&
@@ -1395,6 +1555,49 @@ function renderCalendarGrid(data) {
     cell.appendChild(
       statusEl
     );
+
+    if (
+      isAdminUser() &&
+      bookedCount > 0
+    ) {
+      const adminManageBtn =
+        document.createElement(
+          'button'
+        );
+
+      adminManageBtn.type =
+        'button';
+
+      adminManageBtn.className =
+        'btn btn-secondary btn-sm';
+
+      adminManageBtn.textContent =
+        '⚙ จัดการ';
+
+      adminManageBtn.title =
+        'Admin: แก้ไขหรือยกเลิกรายการลาในวันนี้';
+
+      adminManageBtn.style.marginTop =
+        '0.35rem';
+
+      adminManageBtn.style.width =
+        '100%';
+
+      adminManageBtn.addEventListener(
+        'click',
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+          void openAdminCalendarDay(
+            dateStr
+          );
+        }
+      );
+
+      cell.appendChild(
+        adminManageBtn
+      );
+    }
 
     if (!isPast) {
       cell.addEventListener(
@@ -1975,6 +2178,7 @@ async function openBookingConfirmModal() {
 
     if (reasonEl) {
       reasonEl.value = '';
+      reasonEl.maxLength = 500;
     }
 
     openModal(
@@ -2057,6 +2261,14 @@ async function submitLeaveRequest() {
       ? reasonEl.value.trim()
       : '';
 
+  if (reason.length > 500) {
+    showToast(
+      'เหตุผลการลาต้องไม่เกิน 500 ตัวอักษร',
+      'warning'
+    );
+    return;
+  }
+
   const clientRequestId =
     'req_' +
     Date.now() +
@@ -2081,6 +2293,10 @@ async function submitLeaveRequest() {
             clientRequestId
         }
       );
+
+    rememberCalendarRevision(
+      res.revision
+    );
 
     showToast(
       res.message ||
@@ -2157,6 +2373,394 @@ async function submitLeaveRequest() {
         'error'
       );
     }
+  }
+}
+
+
+
+/* =========================================================
+ * ADMIN CALENDAR MANAGEMENT
+ * ========================================================= */
+
+async function openAdminCalendarDay(dateStr) {
+  if (!isAdminUser()) {
+    showToast(
+      'เฉพาะ Admin เท่านั้นที่สามารถจัดการรายการลาจาก Calendar ได้',
+      'error'
+    );
+    return;
+  }
+
+  try {
+    const res = await callApi(
+      'apiAdminGetDayLeaveDetails',
+      {
+        date: dateStr
+      }
+    );
+
+    rememberCalendarRevision(
+      res.revision
+    );
+
+    const items = Array.isArray(res.data)
+      ? res.data
+      : [];
+
+    showAdminCalendarDayDialog(
+      dateStr,
+      items,
+      {
+        bookedCount: Number(res.bookedCount || items.length),
+        limit: Number(res.limit || 0),
+        exceededBy: Number(res.exceededBy || 0)
+      }
+    );
+
+  } catch (err) {
+    showToast(
+      err.message ||
+      'ไม่สามารถโหลดรายละเอียดวันลาได้',
+      'error'
+    );
+  }
+}
+
+
+function showAdminCalendarDayDialog(
+  dateStr,
+  items,
+  summary
+) {
+  if (!window.Swal) {
+    showToast(
+      `วันที่ ${dateStr} มีรายการลา ${items.length} รายการ`,
+      'info'
+    );
+    return;
+  }
+
+  const itemMap = {};
+
+  items.forEach(item => {
+    itemMap[String(item.requestId)] = item;
+  });
+
+  const overbookHtml =
+    summary.exceededBy > 0
+      ? `
+        <div style="margin-bottom:0.9rem; padding:0.75rem; border-radius:8px; background:rgba(239,68,68,0.12); color:#fecaca; text-align:left;">
+          ⚠️ วันที่นี้เกินจำนวนที่กำหนด
+          <strong>${summary.bookedCount}/${summary.limit} คน</strong>
+          (เกิน ${summary.exceededBy} คน)
+        </div>
+      `
+      : `
+        <div style="margin-bottom:0.9rem; color:#cbd5e1; text-align:left;">
+          จำนวนผู้ลา: <strong>${summary.bookedCount}/${summary.limit} คน</strong>
+        </div>
+      `;
+
+  const rowsHtml = items.length > 0
+    ? items.map(item => {
+        const requestId = escapeHtml(item.requestId);
+        const staffId = escapeHtml(item.staffId || '-');
+        const fullName = escapeHtml(item.fullName || '-');
+        const startDate = escapeHtml(item.startDate || '-');
+        const endDate = escapeHtml(item.endDate || '-');
+        const reason = escapeHtml(item.reason || '-');
+        const createdAt = escapeHtml(item.createdAt || '-');
+
+        return `
+          <div style="padding:0.85rem; margin-bottom:0.7rem; border:1px solid rgba(148,163,184,0.25); border-radius:10px; text-align:left; background:rgba(15,23,42,0.45);">
+            <div style="font-weight:700; color:#f8fafc; margin-bottom:0.35rem;">
+              ${staffId} — ${fullName}
+            </div>
+            <div style="font-size:0.88rem; color:#cbd5e1; line-height:1.55;">
+              ช่วงลา: <strong>${startDate}</strong> ถึง <strong>${endDate}</strong><br>
+              เหตุผล: ${reason}<br>
+              สร้างเมื่อ: ${createdAt}
+            </div>
+            <div style="display:flex; gap:0.5rem; margin-top:0.7rem; flex-wrap:wrap;">
+              <button type="button" class="btn btn-primary btn-sm admin-edit-leave-btn" data-request-id="${requestId}">
+                ✏️ แก้ไข
+              </button>
+              <button type="button" class="btn btn-danger btn-sm admin-cancel-leave-btn" data-request-id="${requestId}">
+                🗑 ยกเลิก
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : `
+      <div style="padding:1rem; color:#94a3b8;">
+        ไม่พบรายการลา ACTIVE ในวันที่นี้
+      </div>
+    `;
+
+  Swal.fire({
+    title: `จัดการวันลา ${dateStr}`,
+    html: `
+      <div style="font-family:'Prompt',sans-serif;">
+        ${overbookHtml}
+        <div style="max-height:55vh; overflow-y:auto; padding-right:0.25rem;">
+          ${rowsHtml}
+        </div>
+      </div>
+    `,
+    width: 720,
+    background: '#1e293b',
+    color: '#f8fafc',
+    confirmButtonColor: '#64748b',
+    confirmButtonText: 'ปิด',
+    didOpen: popup => {
+      popup
+        .querySelectorAll('.admin-edit-leave-btn')
+        .forEach(button => {
+          button.addEventListener('click', () => {
+            const requestId = String(
+              button.dataset.requestId || ''
+            );
+
+            const item = itemMap[requestId];
+
+            if (!item) {
+              return;
+            }
+
+            Swal.close();
+            void openAdminEditLeave(
+              item,
+              dateStr
+            );
+          });
+        });
+
+      popup
+        .querySelectorAll('.admin-cancel-leave-btn')
+        .forEach(button => {
+          button.addEventListener('click', () => {
+            const requestId = String(
+              button.dataset.requestId || ''
+            );
+
+            const item = itemMap[requestId];
+
+            if (!item) {
+              return;
+            }
+
+            Swal.close();
+            void adminCancelLeaveFromCalendar(
+              item,
+              dateStr
+            );
+          });
+        });
+    }
+  });
+}
+
+
+async function openAdminEditLeave(
+  item,
+  sourceDate
+) {
+  if (!window.Swal) {
+    showToast(
+      'ต้องใช้ SweetAlert2 สำหรับหน้าจอแก้ไขรายการลา',
+      'error'
+    );
+    return;
+  }
+
+  const result = await Swal.fire({
+    title: 'Admin แก้ไขรายการลา',
+    html: `
+      <div style="text-align:left; font-family:'Prompt',sans-serif;">
+        <div style="margin-bottom:0.8rem; color:#cbd5e1;">
+          <strong>${escapeHtml(item.staffId || '-')}</strong>
+          — ${escapeHtml(item.fullName || '-')}
+        </div>
+
+        <label style="display:block; margin:0.55rem 0 0.25rem;">วันที่เริ่มลา</label>
+        <input id="adminEditLeaveStart" type="date" class="swal2-input" value="${escapeHtml(item.startDate || '')}" style="width:100%; margin:0;">
+
+        <label style="display:block; margin:0.75rem 0 0.25rem;">วันที่สิ้นสุด</label>
+        <input id="adminEditLeaveEnd" type="date" class="swal2-input" value="${escapeHtml(item.endDate || '')}" style="width:100%; margin:0;">
+
+        <label style="display:block; margin:0.75rem 0 0.25rem;">เหตุผลการลา</label>
+        <textarea id="adminEditLeaveReason" class="swal2-textarea" maxlength="500" style="width:100%; margin:0; min-height:90px;">${escapeHtml(item.reason || '')}</textarea>
+
+        <div style="margin-top:0.75rem; font-size:0.82rem; color:#94a3b8; line-height:1.5;">
+          การเปลี่ยนช่วงวันที่จะถูกตรวจ Daily Cap, Wednesday Cap,
+          Monthly Quota, Duplicate และ Consecutive Days ใหม่ทั้งหมด
+        </div>
+      </div>
+    `,
+    background: '#1e293b',
+    color: '#f8fafc',
+    showCancelButton: true,
+    confirmButtonColor: '#3b82f6',
+    cancelButtonColor: '#64748b',
+    confirmButtonText: 'บันทึกการแก้ไข',
+    cancelButtonText: 'ยกเลิก',
+    focusConfirm: false,
+    preConfirm: () => {
+      const startDate = String(
+        document.getElementById('adminEditLeaveStart').value || ''
+      );
+
+      const endDate = String(
+        document.getElementById('adminEditLeaveEnd').value || ''
+      );
+
+      const reason = String(
+        document.getElementById('adminEditLeaveReason').value || ''
+      ).trim();
+
+      if (!isYmd(startDate) || !isYmd(endDate)) {
+        Swal.showValidationMessage(
+          'กรุณาระบุวันที่ให้ครบถ้วน'
+        );
+        return false;
+      }
+
+      if (endDate < startDate) {
+        Swal.showValidationMessage(
+          'วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่มต้น'
+        );
+        return false;
+      }
+
+      if (reason.length > 500) {
+        Swal.showValidationMessage(
+          'เหตุผลการลาต้องไม่เกิน 500 ตัวอักษร'
+        );
+        return false;
+      }
+
+      return {
+        startDate,
+        endDate,
+        reason
+      };
+    }
+  });
+
+  if (!result.isConfirmed || !result.value) {
+    return;
+  }
+
+  try {
+    const res = await callApi(
+      'apiAdminUpdateLeave',
+      {
+        requestId: item.requestId,
+        startDate: result.value.startDate,
+        endDate: result.value.endDate,
+        reason: result.value.reason
+      }
+    );
+
+    rememberCalendarRevision(
+      res.revision
+    );
+
+    clearCalendarClientCache();
+    await refreshCurrentCalendarSilently();
+
+    showToast(
+      res.message ||
+      'แก้ไขรายการลาเรียบร้อยแล้ว',
+      'success'
+    );
+
+  } catch (err) {
+    const validation =
+      getValidationObjectFromError(err);
+
+    if (validation) {
+      showLeaveValidationError(
+        validation,
+        err.message
+      );
+      return;
+    }
+
+    showToast(
+      err.message ||
+      'ไม่สามารถแก้ไขรายการลาได้',
+      'error'
+    );
+  }
+}
+
+
+async function adminCancelLeaveFromCalendar(
+  item,
+  sourceDate
+) {
+  let confirmed = true;
+
+  if (window.Swal) {
+    const result = await Swal.fire({
+      title: 'Admin ยืนยันยกเลิกรายการลา?',
+      html: `
+        <div style="font-family:'Prompt',sans-serif; line-height:1.6;">
+          <strong>${escapeHtml(item.staffId || '-')}</strong>
+          — ${escapeHtml(item.fullName || '-')}<br>
+          ช่วงลา ${escapeHtml(item.startDate || '-')} ถึง ${escapeHtml(item.endDate || '-')}
+        </div>
+      `,
+      icon: 'warning',
+      background: '#1e293b',
+      color: '#f8fafc',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'ยืนยันยกเลิก',
+      cancelButtonText: 'ไม่ยกเลิก'
+    });
+
+    confirmed = result.isConfirmed;
+  } else {
+    confirmed = window.confirm(
+      `ยืนยันยกเลิกรายการลาของ ${item.fullName || item.staffId || ''}?`
+    );
+  }
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const res = await callApi(
+      'apiAdminCancelLeave',
+      {
+        requestId: item.requestId
+      }
+    );
+
+    rememberCalendarRevision(
+      res.revision
+    );
+
+    clearCalendarClientCache();
+    await refreshCurrentCalendarSilently();
+
+    showToast(
+      res.message ||
+      'ยกเลิกรายการลาเรียบร้อยแล้ว',
+      'success'
+    );
+
+  } catch (err) {
+    showToast(
+      err.message ||
+      'ไม่สามารถยกเลิกรายการลาได้',
+      'error'
+    );
   }
 }
 
@@ -2462,6 +3066,10 @@ async function cancelLeave(
             requestId
         }
       );
+
+    rememberCalendarRevision(
+      res.revision
+    );
 
     showToast(
       res.message ||
@@ -3394,6 +4002,27 @@ async function runValidationTestsFromUI() {
 /* =========================================================
  * START APPLICATION
  * ========================================================= */
+
+document.addEventListener(
+  'visibilitychange',
+  () => {
+    if (
+      document.visibilityState === 'visible' &&
+      AppState.token
+    ) {
+      void checkCalendarRevisionAndRefresh();
+    }
+  }
+);
+
+window.addEventListener(
+  'focus',
+  () => {
+    if (AppState.token) {
+      void checkCalendarRevisionAndRefresh();
+    }
+  }
+);
 
 window.addEventListener(
   'DOMContentLoaded',
